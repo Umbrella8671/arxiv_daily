@@ -1,0 +1,54 @@
+name: Daily Arxiv Update
+
+# 触发机制
+on:
+  schedule:
+    # 每天 UTC 时间 01:00 运行 (相当于北京时间上午 09:00)
+    # 这时候 arXiv 通常已经完成了前一天的论文更新
+    - cron: '0 1 * * *'
+  # 允许手动点击按钮触发 (方便测试)
+  workflow_dispatch:
+
+# 权限设置：允许这个 Action 修改仓库内容 (非常重要)
+permissions:
+  contents: write
+
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. 检出代码仓库
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # 2. 设置 Python 环境
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    # 3. 安装依赖
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install .
+
+    # 4. 运行抓取脚本
+    - name: Run script
+      run: python main.py
+
+    # 5. 将生成的文件推送到仓库
+    - name: Commit and push changes
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        
+        # 将新生成的 arxiv_papers 文件夹添加到暂存区
+        git add arxiv_papers/
+        
+        # 提交更改 (如果没有新文件，这一步会安全跳过)
+        git commit -m "Auto-update: Arxiv papers for $(date +'%Y-%m-%d')" || exit 0
+        
+        # 推送到仓库
+        git push
