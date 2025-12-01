@@ -30,7 +30,7 @@ class ArxivDaily:
 
         self.save_dir = Path("arxiv_papers")
         self.save_dir.mkdir(exist_ok=True)
-        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        today_str = datetime.now().strftime("%Y-%m-%d")
         date_list = today_str.split("-")
         self.daily_dir = self.save_dir / date_list[0] / months_dict[date_list[1]]
         self.daily_dir.mkdir(exist_ok=True)
