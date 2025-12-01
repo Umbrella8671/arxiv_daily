@@ -5,6 +5,22 @@ from pathlib import Path
 from concurrent import futures
 
 
+months_dict = {
+    "1": "January",
+    "2": "February",
+    "3": "March",
+    "4": "April",
+    "5": "May",
+    "6": "June",
+    "7": "July",
+    "8": "August",
+    "9": "September",
+    "10": "October",
+    "11": "November",
+    "12": "December"
+}
+
+
 class ArxivDaily:
     def __init__(self, domains: list[str], max_results: int = 20) -> None:
         self.domains = domains
@@ -14,10 +30,11 @@ class ArxivDaily:
 
         self.save_dir = Path("arxiv_papers")
         self.save_dir.mkdir(exist_ok=True)
-        filename = "paper-" + datetime.now().strftime("%Y-%m-%d") + ".md"
-        self.daily_paper = self.save_dir / filename
-
-
+        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        date_list = today_str.split("-")
+        self.daily_dir = self.save_dir / date_list[0] / months_dict[date_list[1]]
+        self.daily_dir.mkdir(exist_ok=True)
+        self.paper_dir = self.daily_dir / ("paper-" + today_str + ".md")
 
     def _wrapper_fetch(self, max_results: int):
         search_query = " OR ".join([f"cat:{domain}" for domain in self.domains])
@@ -52,9 +69,8 @@ class ArxivDaily:
             }
             self.papers.append(paper_info)
 
-
     def save_papers(self):
-        with open(self.daily_paper, "w", encoding="utf-8") as f:
+        with open(self.paper_dir, "w", encoding="utf-8") as f:
             f.write(f"# ArXiv Papers for {datetime.now().strftime('%Y-%m-%d')}\n\n")
             for paper in self.papers:
                 f.write(f"## {paper['title']}\n")
@@ -72,7 +88,6 @@ class ArxivDaily:
         self.save_papers()
 
         
-
 if __name__ == "__main__":
     app = ArxivDaily(domains=["cs.AI", "cs.LG", "cs.CV", "cs.CL"], max_results=20)
     app.run()
