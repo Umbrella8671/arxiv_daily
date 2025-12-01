@@ -33,7 +33,7 @@ class ArxivDaily:
         today_str = datetime.now().strftime("%Y-%m-%d")
         date_list = today_str.split("-")
         self.daily_dir = self.save_dir / date_list[0] / months_dict[date_list[1]]
-        self.daily_dir.mkdir(exist_ok=True)
+        self.daily_dir.mkdir(parents=True, exist_ok=True)
         self.paper_dir = self.daily_dir / ("paper-" + today_str + ".md")
 
     def _wrapper_fetch(self, max_results: int):
