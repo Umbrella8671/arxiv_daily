@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: daily-arxiv-update-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -15,6 +19,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Update checkout to latest main
+        run: git pull --ff-only origin main
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -42,4 +49,5 @@ jobs:
           git add -A output/papers output/rss output/rss.xml
           git diff --cached --quiet && exit 0
           git commit -m "Update arXiv AI RSS output"
+          git pull --rebase origin main
           git push
