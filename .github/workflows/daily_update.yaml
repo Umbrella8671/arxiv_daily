@@ -1,0 +1,45 @@
+name: Daily Arxiv Update
+
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests
+        run: uv run pytest
+
+      - name: Run arXiv pipeline
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+        run: uv run python scripts/run_pipeline.py
+
+      - name: Commit generated output
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add -A output/papers output/rss output/rss.xml
+          git diff --cached --quiet && exit 0
+          git commit -m "Update arXiv AI RSS output"
+          git push
