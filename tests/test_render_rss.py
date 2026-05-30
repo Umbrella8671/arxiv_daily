@@ -29,3 +29,4 @@ def test_render_rss_creates_channel_and_items() -> None:
     assert item.findtext("link") == "https://example.test/output/papers/1234.00001.md"
     assert item.findtext("guid") == "https://arxiv.org/abs/1234.00001"
     assert item.findtext("description") == "Summary text."
+    assert item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded") == "<p>Summary text.</p>"

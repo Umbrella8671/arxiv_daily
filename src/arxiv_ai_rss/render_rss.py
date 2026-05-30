@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from email.utils import format_datetime
+from html import escape
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 from xml.etree import ElementTree
+
+CONTENT_NS = "http://purl.org/rss/1.0/modules/content/"
+ElementTree.register_namespace("content", CONTENT_NS)
 
 
 def render_rss(items: Sequence[Mapping[str, Any]], *, title: str, site_url: str) -> str:
@@ -19,7 +23,9 @@ def render_rss(items: Sequence[Mapping[str, Any]], *, title: str, site_url: str)
         ElementTree.SubElement(node, "title").text = str(item["title"])
         ElementTree.SubElement(node, "link").text = str(item["link"])
         ElementTree.SubElement(node, "guid").text = str(item.get("guid", item["link"]))
-        ElementTree.SubElement(node, "description").text = str(item.get("description", ""))
+        description = str(item.get("description", ""))
+        ElementTree.SubElement(node, "description").text = description
+        ElementTree.SubElement(node, f"{{{CONTENT_NS}}}encoded").text = _description_html(description)
         pub_date = _parse_date(item.get("published"))
         if pub_date is not None:
             ElementTree.SubElement(node, "pubDate").text = format_datetime(pub_date)
@@ -44,3 +50,8 @@ def _parse_date(value: Any) -> datetime | None:
     if date_value.tzinfo is None:
         date_value = date_value.replace(tzinfo=timezone.utc)
     return date_value
+
+
+def _description_html(description: str) -> str:
+    paragraphs = [part.strip() for part in description.split("\n\n") if part.strip()]
+    return "\n".join(f"<p>{escape(part).replace('\n', '<br>')}</p>" for part in paragraphs)
