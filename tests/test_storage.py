@@ -35,6 +35,7 @@ def test_rss_items_from_paths_only_uses_given_markdown_files(tmp_path) -> None:
     items = rss_items_from_paths([first_path], "https://example.test")
 
     assert [item["title"] for item in items] == ["First"]
+    assert items[0]["guid"] == "https://example.test/" + first_path.as_posix()
     assert "arXiv: https://arxiv.org/abs/1234.00001" in items[0]["description"]
     assert "PDF: https://arxiv.org/pdf/1234.00001" in items[0]["description"]
     assert "Authors: Ada Lovelace" in items[0]["description"]

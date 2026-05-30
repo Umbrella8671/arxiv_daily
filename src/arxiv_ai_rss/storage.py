@@ -75,11 +75,12 @@ def rss_items_from_paths(paths: Any, site_url: str) -> list[dict[str, str]]:
         arxiv_id = metadata.get("arxiv_id")
         if not isinstance(title, str) or not isinstance(arxiv_id, str):
             continue
+        link = _site_link(site_url, path)
         items.append(
             {
                 "title": title,
-                "link": _site_link(site_url, path),
-                "guid": str(metadata.get("arxiv_url", arxiv_id)),
+                "link": link,
+                "guid": link,
                 "description": _rss_description(path, metadata),
                 "published": str(metadata.get("published", "")),
             }
