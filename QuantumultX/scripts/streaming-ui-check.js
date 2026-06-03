@@ -35,7 +35,7 @@ const FILM_ID = 81280792
 const POLICY_NAME = 'Netflix'
 const ARROW = ' ➟ '
 
-const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.61 Safari/537.36'
+const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
 
 const STATUS_COMING = 2
 const STATUS_AVAILABLE = 1
@@ -743,6 +743,13 @@ function testClaude() {
       console.log('Claude: ' + code)
 
       const blocked = /unsupported_country|not available in your country|not available in your region|country is not supported|region is not supported/i.test(data + headers)
+      const isCloudflare = /cloudflare/i.test(headers) || /cf-mitigated/i.test(headers) || (data.indexOf('challenges.cloudflare.com') !== -1)
+
+      if (code === 403 && isCloudflare && !blocked) {
+        result.Claude = '<b>Claude: </b>防机器验证 🚧'
+        resolve('Claude Challenge')
+        return
+      }
 
       if (code === 403 || code === 451 || blocked) {
         result.Claude = '<b>Claude: </b>未支持 🚫'
