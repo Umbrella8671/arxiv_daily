@@ -35,13 +35,6 @@ IP-CIDR,24.199.123.28/32,no-resolve
 IP-CIDR,64.23.132.171/32,no-resolve
 IP-ASN,20473,no-resolve
 
-# ===== Gemini / Google AI =====
-DOMAIN,gemini.google.com
-DOMAIN-SUFFIX,gemini.google
-DOMAIN,generativelanguage.googleapis.com
-DOMAIN-SUFFIX,googleapis.com
-DOMAIN-SUFFIX,gstatic.com
-DOMAIN-SUFFIX,googleusercontent.com
 
 
 # ===== Copilot / Microsoft AI =====
