@@ -1,8 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<rss version="2.0">
-  <channel>
-    <title>arXiv AI Paper Digest</title>
-    <link>https://raw.githubusercontent.com/Umbrella8671/arxiv_daily/refs/heads/main</link>
-    <description>arXiv AI Paper Digest generated from arXiv summaries</description>
-  </channel>
-</rss>
