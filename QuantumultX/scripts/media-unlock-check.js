@@ -1,96 +1,611 @@
-/**
- * Media Unlock Checker for Quantumult X
- * Migrated completely from clash-verge-rev logic
- * Structure mirrors the original qx.js exactly.
- */
+/***
 
-const BASE_URL_YTB = 'https://www.youtube.com/premium?hl=en'
-const BASE_URL_DISNEY = 'https://www.disneyplus.com'
-const FILM_ID_1 = 81280792
-const FILM_ID_2 = 70143836
-const FILM_ID_3 = 80018499
-const NETFLIX_CDN_URL = 'https://api.fast.com/netflix/speedtest/v2?https=true&token=YXNkZmFzZGxmbnNkYWZoYXNkZmhrYWxm&urlCount=5'
-const BILIBILI_MAINLAND_URL = 'https://api.bilibili.com/pgc/player/web/playurl?avid=82846771&qn=0&type=&otype=json&ep_id=307247&fourk=1&fnver=0&fnval=16&module=bangumi'
-const BILIBILI_HKMOtw_URL = 'https://api.bilibili.com/pgc/player/web/playurl?avid=18281381&cid=29892777&qn=0&type=&otype=json&ep_id=183799&fourk=1&fnver=0&fnval=16&module=bangumi'
-const BASE_URL_PRIME = 'https://www.primevideo.com'
-const BASE_URL_SPOTIFY = 'https://www.spotify.com/api/content/v1/country-selector?platform=web&format=json'
-const BASE_URL_TIKTOK_TRACE = 'https://www.tiktok.com/cdn-cgi/trace'
-const BASE_URL_BAHAMUT_DEVICE = 'https://ani.gamer.com.tw/ajax/getdeviceid.php'
-const BASE_URL_CHATGPT_TRACE = 'https://chat.openai.com/cdn-cgi/trace'
-const BASE_URL_CHATGPT_WEB = 'https://api.openai.com/compliance/cookie_requirements'
-const BASE_URL_CHATGPT_IOS = 'https://ios.chat.openai.com/'
-const BASE_URL_GEMINI = 'https://gemini.google.com'
-const BASE_URL_CLAUDE_TRACE = 'https://claude.ai/cdn-cgi/trace'
+[task_local]
+event-interaction https://raw.githubusercontent.com/.../streaming-ui-check.js, tag=流媒体解锁检测, img-url=play.tv.fill.system
 
-const ARROW = ' ➟ '
+@Description: 流媒体 & AI 服务解锁检测 (Netflix, YouTube, Spotify, ChatGPT, Claude, Gemini, Bahamut, Prime Video, TikTok)
+@Update: 2026-07-04
+
+逻辑 1:1 翻译自 clash-verge-rev Rust 源码
+
+***/
+
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+const ARROW = ' ➟ '
+const TIMEOUT = 5000
 
-const opts = {
-  policy: $environment.params,
-}
+const opts = { policy: $environment.params }
+const optsNoRedirect = { policy: $environment.params, redirection: false }
 
-const optsNoRedirect = {
-  policy: $environment.params,
-  redirection: false,
-}
-
+// ─── 结果容器 ───
 const result = {
-  title: '    📺  流媒体服务查询',
-  Netflix: '<b>Netflix: </b>检测失败，请重试 ❗️',
-  YouTube: '<b>YouTube Premium: </b>检测失败，请重试 ❗️',
-  Disney: '<b>Disneyᐩ: </b>检测失败，请重试 ❗️',
-  PrimeVideo: '<b>Prime Video: </b>检测失败，请重试 ❗️',
-  Spotify: '<b>Spotify: </b>检测失败，请重试 ❗️',
-  TikTok: '<b>TikTok: </b>检测失败，请重试 ❗️',
-  BilibiliMainland: '<b>哔哩哔哩大陆: </b>检测失败，请重试 ❗️',
-  BilibiliHKMOTW: '<b>哔哩哔哩港澳台: </b>检测失败，请重试 ❗️',
-  Bahamut: '<b>Bahamut Anime: </b>检测失败，请重试 ❗️',
-  ChatGPT: '<b>ChatGPT: </b>检测失败，请重试 ❗️',
-  Gemini: '<b>Gemini: </b>检测失败，请重试 ❗️',
-  Claude: '<b>Claude: </b>检测失败，请重试 ❗️',
+  Netflix:     '',
+  YouTube:     '',
+  Spotify:     '',
+  ChatGPTiOS:  '',
+  ChatGPTWeb:  '',
+  Claude:      '',
+  Gemini:      '',
+  Bahamut:     '',
+  PrimeVideo:  '',
+  TikTok:      '',
 }
 
-const message = {
-  action: 'get_policy_state',
-  content: $environment.params,
+// ═══════════════════════════════════════════════════
+//  工具函数
+// ═══════════════════════════════════════════════════
+
+function countryCodeToFlag(code) {
+  if (!code) return ''
+  code = String(code).toUpperCase()
+  if (code === 'UK') code = 'GB'
+  if (!/^[A-Z]{2}$/.test(code)) return ''
+  return String.fromCodePoint(code.charCodeAt(0) - 65 + 0x1F1E6)
+       + String.fromCodePoint(code.charCodeAt(1) - 65 + 0x1F1E6)
 }
 
-function regionText(region) {
-  region = String(region || '').toUpperCase()
-  const flag = countryCodeToFlag(region)
-  return flag ? '⟦' + flag + '⟧' : (region ? '⟦' + region + '⟧' : '')
+function regionTag(code) {
+  code = String(code || '').toUpperCase()
+  const flag = countryCodeToFlag(code)
+  return flag ? '⟦' + flag + code + '⟧' : (code ? '⟦' + code + '⟧' : '')
 }
 
-function countryCodeToFlag(region) {
-  region = String(region || '').toUpperCase()
-  if (region === 'UK') region = 'GB'
-  if (!/^[A-Z]{2}$/.test(region)) return ''
-  const first = region.charCodeAt(0) - 65 + 0x1F1E6
-  const second = region.charCodeAt(1) - 65 + 0x1F1E6
-  return String.fromCodePoint(first) + String.fromCodePoint(second)
+function statusCode(resp) {
+  return resp.statusCode || resp.status || 0
 }
 
-function statusCodeOf(response) {
-  return response.statusCode || response.status || 0
-}
-
-function getTraceRegion(traceUrl) {
-  return new Promise(resolve => {
-    $task.fetch({
-      url: traceUrl,
-      opts: optsNoRedirect,
-      timeout: 3000,
-      headers: { 'User-Agent': UA },
-    }).then(response => {
-      const body = response.body || ''
-      const match = body.match(/loc=([A-Z]{2})/i)
-      resolve(match ? match[1].toUpperCase() : '')
-    }, () => resolve(''))
+function fetchWithTimeout(option) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject('Timeout'), option.timeout || TIMEOUT)
+    $task.fetch(option).then(resp => {
+      clearTimeout(timer)
+      resolve(resp)
+    }, err => {
+      clearTimeout(timer)
+      reject(err)
+    })
   })
+}
+
+/** 解析 Cloudflare cdn-cgi/trace 中的 loc=XX */
+function getTraceRegion(traceUrl) {
+  return fetchWithTimeout({
+    url: traceUrl,
+    opts: opts,
+    timeout: TIMEOUT,
+    headers: { 'User-Agent': UA },
+  }).then(resp => {
+    const m = (resp.body || '').match(/loc=([A-Z]{2})/i)
+    return m ? m[1].toUpperCase() : ''
+  }).catch(() => '')
+}
+
+function line(label, status) {
+  return '<b>' + label + ': </b>' + status
+}
+
+// ═══════════════════════════════════════════════════
+//  Netflix  (3-phase: CDN → Title × 2 → Region)
+// ═══════════════════════════════════════════════════
+
+function testNetflix() {
+  return testNetflixCDN().then(cdn => {
+    if (cdn.ok) {
+      result.Netflix = line('Netflix', '完整支持' + ARROW + regionTag(cdn.region) + ' 🎉')
+      return
+    }
+    if (cdn.banned) {
+      result.Netflix = line('Netflix', 'IP 被封禁 🚫')
+      return
+    }
+    return testNetflixTitles()
+  }).catch(() => {
+    if (!result.Netflix) result.Netflix = line('Netflix', '检测失败 ❗️')
+  })
+}
+
+function testNetflixCDN() {
+  return fetchWithTimeout({
+    url: 'https://api.fast.com/netflix/speedtest/v2?https=true&token=YXNkZmFzZGxmbnNkYWZoYXNkZmhrYWxm&urlCount=5',
+    opts: opts,
+    timeout: TIMEOUT,
+    headers: { 'User-Agent': UA },
+  }).then(resp => {
+    if (statusCode(resp) === 403) return { banned: true }
+    try {
+      const data = JSON.parse(resp.body)
+      if (data.targets && data.targets.length > 0 && data.targets[0].location) {
+        return { ok: true, region: data.targets[0].location.country || '' }
+      }
+    } catch (e) { /* ignore */ }
+    return {}
+  }).catch(() => ({}))
+}
+
+function testNetflixTitles() {
+  const fetch1 = fetchWithTimeout({
+    url: 'https://www.netflix.com/title/81280792',
+    opts: opts,
+    timeout: TIMEOUT,
+    headers: { 'User-Agent': UA },
+  }).then(r => statusCode(r)).catch(() => 0)
+
+  const fetch2 = fetchWithTimeout({
+    url: 'https://www.netflix.com/title/70143836',
+    opts: opts,
+    timeout: TIMEOUT,
+    headers: { 'User-Agent': UA },
+  }).then(r => statusCode(r)).catch(() => 0)
+
+  return Promise.all([fetch1, fetch2]).then(codes => {
+    const s1 = codes[0], s2 = codes[1]
+
+    if (s1 === 403 || s2 === 403) {
+      result.Netflix = line('Netflix', '未支持 🚫')
+      return
+    }
+
+    if (s1 === 404 && s2 === 404) {
+      result.Netflix = line('Netflix', '仅自制剧集 ⚠️')
+      return
+    }
+
+    if (s1 === 200 || s1 === 301 || s2 === 200 || s2 === 301) {
+      return testNetflixRegion()
+    }
+
+    result.Netflix = line('Netflix', '检测失败 ❗️')
+  })
+}
+
+function testNetflixRegion() {
+  return fetchWithTimeout({
+    url: 'https://www.netflix.com/title/80018499',
+    opts: optsNoRedirect,
+    timeout: TIMEOUT,
+    headers: { 'User-Agent': UA },
+  }).then(resp => {
+    let region = 'US'
+    const headers = resp.headers || {}
+    const loc = headers['Location'] || headers['location'] || ''
+    if (loc) {
+      const parts = loc.split('/')
+      if (parts.length >= 4) {
+        region = (parts[3].split('-')[0] || 'US').toUpperCase()
+      }
+    }
+    result.Netflix = line('Netflix', '完整支持' + ARROW + regionTag(region) + ' 🎉')
+  }).catch(() => {
+    result.Netflix = line('Netflix', '支持 (区域未知) 🎉')
+  })
+}
+
+// ═══════════════════════════════════════════════════
+//  YouTube Premium  (4 regex patterns)
+// ═══════════════════════════════════════════════════
+
+function testYouTubePremium() {
+  return fetchWithTimeout({
+    url: 'https://www.youtube.com/premium?hl=en',
+    opts: opts,
+    timeout: TIMEOUT,
+    headers: { 'User-Agent': UA },
+  }).then(resp => {
+    const code = statusCode(resp)
+    const body = resp.body || ''
+    const bodyLower = body.toLowerCase()
+
+    // 区域提取 (4 种 regex，按优先级)
+    let region = ''
+    const patterns = [
+      /id=['"]country-code['"][^>]*>\s*([A-Za-z]{2,3})\s*</,
+      /"GL"\s*:\s*"([A-Za-z]{2})"/,
+      /"countryCode"\s*:\s*"([A-Za-z]{2})"/,
+      /"country_code"\s*:\s*"([A-Za-z]{2})"/,
+    ]
+    for (let i = 0; i < patterns.length; i++) {
+      const m = body.match(patterns[i])
+      if (m && m[1]) { region = m[1].toUpperCase(); break }
+    }
+
+    // 状态判断
+    if (bodyLower.indexOf('youtube premium is not available in your country') !== -1
+     || bodyLower.indexOf('premium is not available in your country') !== -1
+     || bodyLower.indexOf('premium is not available in your region') !== -1) {
+      result.YouTube = line('YouTube Premium', '未支持 🚫')
+      return
+    }
+
+    if (code >= 200 && code < 300
+     && (bodyLower.indexOf('youtube premium') !== -1
+      || bodyLower.indexOf('ad-free') !== -1
+      || bodyLower.indexOf('"browseid":"spunlimited"') !== -1)) {
+      result.YouTube = line('YouTube Premium', '支持' + ARROW + regionTag(region) + ' 🎉')
+      return
+    }
+
+    result.YouTube = line('YouTube Premium', '检测失败 ❗️')
+  }).catch(() => {
+    result.YouTube = line('YouTube Premium', '检测超时 🚦')
+  })
+}
+
+// ═══════════════════════════════════════════════════
+//  Spotify  (country-selector API, no redirect)
+// ═══════════════════════════════════════════════════
+
+function testSpotify() {
+  return fetchWithTimeout({
+    url: 'https://www.spotify.com/api/content/v1/country-selector?platform=web&format=json',
+    opts: opts,
+    timeout: TIMEOUT,
+    headers: { 'User-Agent': UA },
+  }).then(resp => {
+    const code = statusCode(resp)
+    const body = resp.body || ''
+    const bodyLower = body.toLowerCase()
+
+    if (code === 403 || code === 451) {
+      result.Spotify = line('Spotify', '未支持 🚫')
+      return
+    }
+    if (code < 200 || code >= 300) {
+      result.Spotify = line('Spotify', '检测失败 ❗️')
+      return
+    }
+    if (bodyLower.indexOf('not available in your country') !== -1) {
+      result.Spotify = line('Spotify', '未支持 🚫')
+      return
+    }
+
+    // 区域提取：从 body 中解析 countryCode
+    let region = ''
+    const m = body.match(/"countryCode"\s*:\s*"([A-Z]+)"/i)
+    if (m && m[1]) region = m[1].toUpperCase()
+
+    result.Spotify = line('Spotify', '支持' + ARROW + regionTag(region) + ' 🎉')
+  }).catch(() => {
+    result.Spotify = line('Spotify', '检测超时 🚦')
+  })
+}
+
+// ═══════════════════════════════════════════════════
+//  ChatGPT  (2 items: iOS + Web)
+// ═══════════════════════════════════════════════════
+
+function testChatGPT() {
+  return getTraceRegion('https://chat.openai.com/cdn-cgi/trace').then(region => {
+    const regionStr = region ? ARROW + regionTag(region) : ''
+
+    const iosPromise = fetchWithTimeout({
+      url: 'https://ios.chat.openai.com/',
+      opts: opts,
+      timeout: TIMEOUT,
+      headers: { 'User-Agent': UA },
+    }).then(resp => {
+      const body = (resp.body || '').toLowerCase()
+      if (body.indexOf('you may be connected to a disallowed isp') !== -1) {
+        result.ChatGPTiOS = line('ChatGPT iOS', 'ISP 受限 ⚠️' + regionStr)
+      } else if (body.indexOf('request is not allowed. please try again later.') !== -1) {
+        result.ChatGPTiOS = line('ChatGPT iOS', '支持' + regionStr + ' 🎉')
+      } else if (body.indexOf('sorry, you have been blocked') !== -1) {
+        result.ChatGPTiOS = line('ChatGPT iOS', '已封锁 🚫')
+      } else {
+        result.ChatGPTiOS = line('ChatGPT iOS', '检测失败 ❗️')
+      }
+    }).catch(() => {
+      result.ChatGPTiOS = line('ChatGPT iOS', '检测超时 🚦')
+    })
+
+    const webPromise = fetchWithTimeout({
+      url: 'https://api.openai.com/compliance/cookie_requirements',
+      opts: opts,
+      timeout: TIMEOUT,
+      headers: { 'User-Agent': UA },
+    }).then(resp => {
+      const body = (resp.body || '').toLowerCase()
+      if (body.indexOf('unsupported_country') !== -1) {
+        result.ChatGPTWeb = line('ChatGPT Web', '未支持 🚫' + regionStr)
+      } else {
+        result.ChatGPTWeb = line('ChatGPT Web', '支持' + regionStr + ' 🎉')
+      }
+    }).catch(() => {
+      result.ChatGPTWeb = line('ChatGPT Web', '检测超时 🚦')
+    })
+
+    return Promise.all([iosPromise, webPromise])
+  })
+}
+
+// ═══════════════════════════════════════════════════
+//  Claude  (trace + blocked list)
+// ═══════════════════════════════════════════════════
+
+const CLAUDE_BLOCKED = ['AF', 'BY', 'CN', 'CU', 'HK', 'IR', 'KP', 'MO', 'RU', 'SY']
+
+function testClaude() {
+  return getTraceRegion('https://claude.ai/cdn-cgi/trace').then(region => {
+    if (!region) {
+      result.Claude = line('Claude', '检测失败 ❗️')
+    } else if (CLAUDE_BLOCKED.indexOf(region) !== -1) {
+      result.Claude = line('Claude', '未支持 🚫')
+    } else {
+      result.Claude = line('Claude', '支持' + ARROW + regionTag(region) + ' 🎉')
+    }
+  })
+}
+
+// ═══════════════════════════════════════════════════
+//  Gemini  (body marker ,2,1,200," + alpha-3 code)
+// ═══════════════════════════════════════════════════
+
+const GEMINI_BLOCKED = ['CHN', 'RUS', 'BLR', 'CUB', 'IRN', 'PRK', 'SYR', 'HKG', 'MAC']
+
+function testGemini() {
+  return fetchWithTimeout({
+    url: 'https://gemini.google.com',
+    opts: opts,
+    timeout: TIMEOUT,
+    headers: { 'User-Agent': UA },
+  }).then(resp => {
+    const body = resp.body || ''
+    const marker = ',2,1,200,"'
+    const idx = body.indexOf(marker)
+
+    if (idx !== -1) {
+      const code = body.substring(idx + marker.length, idx + marker.length + 3)
+      if (/^[A-Z]{3}$/.test(code)) {
+        if (GEMINI_BLOCKED.indexOf(code) !== -1) {
+          result.Gemini = line('Gemini', '未支持 🚫')
+        } else {
+          result.Gemini = line('Gemini', '支持' + ARROW + regionTag(code) + ' 🎉')
+        }
+        return
+      }
+    }
+    result.Gemini = line('Gemini', '检测失败 ❗️')
+  }).catch(() => {
+    result.Gemini = line('Gemini', '检测超时 🚦')
+  })
+}
+
+// ═══════════════════════════════════════════════════
+//  Bahamut 動畫瘋  (deviceid → token → region)
+// ═══════════════════════════════════════════════════
+
+function testBahamut() {
+  return fetchWithTimeout({
+    url: 'https://ani.gamer.com.tw/ajax/getdeviceid.php',
+    opts: opts,
+    timeout: TIMEOUT,
+    headers: { 'User-Agent': UA },
+  }).then(resp => {
+    const body = resp.body || ''
+    const m = body.match(/"deviceid"\s*:\s*"([^"]+)"/)
+    const deviceId = m ? m[1] : ''
+
+    if (!deviceId) {
+      result.Bahamut = line('Bahamut 動畫瘋', '检测失败 ❗️')
+      return
+    }
+
+    return fetchWithTimeout({
+      url: 'https://ani.gamer.com.tw/ajax/token.php?adID=89422&sn=37783&device=' + deviceId,
+      opts: opts,
+      timeout: TIMEOUT,
+      headers: { 'User-Agent': UA },
+    }).then(tokenResp => {
+      const tokenBody = tokenResp.body || ''
+
+      if (tokenBody.indexOf('animeSn') === -1) {
+        result.Bahamut = line('Bahamut 動畫瘋', '未支持 🚫')
+        return
+      }
+
+      // Step 3: 获取区域
+      return fetchWithTimeout({
+        url: 'https://ani.gamer.com.tw/',
+        opts: opts,
+        timeout: TIMEOUT,
+        headers: { 'User-Agent': UA },
+      }).then(mainResp => {
+        const mainBody = mainResp.body || ''
+        const geoMatch = mainBody.match(/data-geo="([^"]+)"/)
+        const region = geoMatch ? geoMatch[1].toUpperCase() : ''
+
+        result.Bahamut = line('Bahamut 動畫瘋', '支持' + ARROW + regionTag(region) + ' 🎉')
+      }).catch(() => {
+        result.Bahamut = line('Bahamut 動畫瘋', '支持 (区域未知) 🎉')
+      })
+    })
+  }).catch(() => {
+    result.Bahamut = line('Bahamut 動畫瘋', '检测超时 🚦')
+  })
+}
+
+// ═══════════════════════════════════════════════════
+//  Prime Video  (currentTerritory)
+// ═══════════════════════════════════════════════════
+
+function testPrimeVideo() {
+  return fetchWithTimeout({
+    url: 'https://www.primevideo.com',
+    opts: opts,
+    timeout: TIMEOUT,
+    headers: { 'User-Agent': UA },
+  }).then(resp => {
+    const body = resp.body || ''
+
+    if (body.indexOf('isServiceRestricted') !== -1) {
+      result.PrimeVideo = line('Prime Video', '未支持 🚫')
+      return
+    }
+
+    const m = body.match(/"currentTerritory"\s*:\s*"([^"]+)"/)
+    if (m && m[1]) {
+      const region = m[1].toUpperCase()
+      result.PrimeVideo = line('Prime Video', '支持' + ARROW + regionTag(region) + ' 🎉')
+    } else {
+      result.PrimeVideo = line('Prime Video', '检测失败 ❗️')
+    }
+  }).catch(() => {
+    result.PrimeVideo = line('Prime Video', '检测超时 🚦')
+  })
+}
+
+// ═══════════════════════════════════════════════════
+//  TikTok  (trace + fallback to main page)
+// ═══════════════════════════════════════════════════
+
+function testTikTok() {
+  let tiktokStatus = 'Failed'
+  let tiktokRegion = ''
+
+  return fetchWithTimeout({
+    url: 'https://www.tiktok.com/cdn-cgi/trace',
+    opts: opts,
+    timeout: TIMEOUT,
+    headers: { 'User-Agent': UA },
+  }).then(resp => {
+    const code = statusCode(resp)
+    const body = resp.body || ''
+    const parsed = parseTikTokResponse(code, body)
+    tiktokStatus = parsed.status
+    tiktokRegion = parsed.region
+
+    // 从 trace 中也提取 loc
+    if (!tiktokRegion) {
+      const locMatch = body.match(/loc=([A-Z]{2})/i)
+      if (locMatch) tiktokRegion = locMatch[1].toUpperCase()
+    }
+  }).catch(() => {
+    // trace 失败，后续 fallback
+  }).then(() => {
+    if (tiktokRegion && tiktokStatus !== 'Failed') {
+      applyTikTokResult(tiktokStatus, tiktokRegion)
+      return
+    }
+
+    // Fallback: 主页面
+    return fetchWithTimeout({
+      url: 'https://www.tiktok.com/',
+      opts: opts,
+      timeout: TIMEOUT,
+      headers: { 'User-Agent': UA, 'Accept-Language': 'en' },
+    }).then(resp => {
+      const code = statusCode(resp)
+      const body = resp.body || ''
+      const parsed = parseTikTokResponse(code, body)
+
+      if (tiktokStatus !== 'No') tiktokStatus = parsed.status
+      if (!tiktokRegion) tiktokRegion = parsed.region
+
+      applyTikTokResult(tiktokStatus, tiktokRegion)
+    }).catch(() => {
+      applyTikTokResult(tiktokStatus, tiktokRegion)
+    })
+  })
+}
+
+function parseTikTokResponse(code, body) {
+  let status = 'Failed'
+  let region = ''
+
+  if (code === 403 || code === 451) {
+    status = 'No'
+  } else if (code >= 200 && code < 300) {
+    const bodyLower = body.toLowerCase()
+    if (bodyLower.indexOf('access denied') !== -1
+     || bodyLower.indexOf('not available in your region') !== -1
+     || bodyLower.indexOf('tiktok is not available') !== -1) {
+      status = 'No'
+    } else {
+      status = 'Yes'
+    }
+  }
+
+  const m = body.match(/"region"\s*:\s*"([a-zA-Z-]+)"/)
+  if (m && m[1]) {
+    region = m[1].split('-')[0].toUpperCase()
+  }
+
+  return { status, region }
+}
+
+function applyTikTokResult(status, region) {
+  if (status === 'Yes') {
+    result.TikTok = line('TikTok', '支持' + ARROW + regionTag(region) + ' 🎉')
+  } else if (status === 'No') {
+    result.TikTok = line('TikTok', '未支持 🚫')
+  } else {
+    result.TikTok = line('TikTok', '检测失败 ❗️')
+  }
+}
+
+// ═══════════════════════════════════════════════════
+//  主入口 & HTML 输出
+// ═══════════════════════════════════════════════════
+
+;(async () => {
+  try {
+    // 初始化所有结果为默认值
+    Object.keys(result).forEach(k => {
+      if (!result[k]) result[k] = line(k, '检测失败 ❗️')
+    })
+
+    await Promise.all([
+      testNetflix(),
+      testYouTubePremium(),
+      testSpotify(),
+      testChatGPT(),
+      testClaude(),
+      testGemini(),
+      testBahamut(),
+      testPrimeVideo(),
+      testTikTok(),
+    ].map(p => p.catch(e => console.log('Task error: ' + e))))
+
+    const output = await getPolicyOutput()
+    $done({ title: '    📺  流媒体 & AI 解锁检测', htmlMessage: buildHtml(output) })
+  } catch (e) {
+    console.log('Main error: ' + e)
+    $done({
+      title: '    📺  流媒体 & AI 解锁检测',
+      htmlMessage: errorHtml(String(e || '检测异常')),
+    })
+  }
+})()
+
+function buildHtml(policyOutput) {
+  const items = [
+    result.Netflix,
+    result.YouTube,
+    result.Spotify,
+    result.PrimeVideo,
+    result.Bahamut,
+    result.TikTok,
+    result.ChatGPTiOS,
+    result.ChatGPTWeb,
+    result.Claude,
+    result.Gemini,
+  ]
+
+  let html = '<div style="text-align: center; font-family: -apple-system; font-size: 15px; line-height: 1.6;">'
+  html += '<hr style="margin: 8px 0; border: 0; border-top: 1px solid #ddd;"/>'
+  html += items.join('<br/>')
+  html += '<hr style="margin: 8px 0; border: 0; border-top: 1px solid #ddd;"/>'
+  html += '<font color="#6959CD"><b>节点</b> ➟ ' + policyOutput + '</font>'
+  html += '</div>'
+  return html
+}
+
+function errorHtml(msg) {
+  return '<p style="text-align: center; font-family: -apple-system; font-size: large; font-weight: bold;">🚥 ' + msg + '</p>'
 }
 
 function getPolicyOutput() {
   return new Promise(resolve => {
+    const message = { action: 'get_policy_state', content: $environment.params }
     $configuration.sendMessage(message).then(response => {
       if (response && response.error) {
         resolve($environment.params)
@@ -98,8 +613,8 @@ function getPolicyOutput() {
       }
       if (response && response.ret && response.ret[message.content]) {
         const output = JSON.stringify(response.ret[message.content])
-          .replace(/\"|\\[|\\]/g, '')
-          .replace(/\,/g, ' ➟ ')
+          .replace(/\\"|[\[\]]/g, '')
+          .replace(/,/g, ' ➟ ')
         resolve(output || $environment.params)
         return
       }
@@ -107,542 +622,3 @@ function getPolicyOutput() {
     }, () => resolve($environment.params))
   })
 }
-
-function buildHtmlMessage(output) {
-  const items = [
-    result.Netflix,
-    result.YouTube,
-    result.Disney,
-    result.PrimeVideo,
-    result.Spotify,
-    result.TikTok,
-    result.BilibiliMainland,
-    result.BilibiliHKMOTW,
-    result.Bahamut,
-    result.ChatGPT,
-    result.Gemini,
-    result.Claude,
-  ]
-  let content = '--------------------------------------</br>' + items.join('</br></br>')
-  content += '</br>--------------------------------------</br>'
-  content += '<font color=#CD5C5C><b>节点</b> ➟ ' + output + '</font>'
-  return '<p style="text-align: center; font-family: -apple-system; font-size: large; font-weight: thin">' + content + '</p>'
-}
-
-function buildErrorMessage(errorText) {
-  const output = $environment.params || ''
-  return '<p style="text-align: center; font-family: -apple-system; font-size: large; font-weight: thin">' +
-    '----------------------</br></br>' +
-    '🚥 ' + errorText +
-    '</br></br>----------------------</br>' +
-    output +
-    '</p>'
-}
-
-// ── Netflix ───────────────────────────────────────────────────────────────────
-// Logic from clash-verge-rev: first try Fast.com CDN API, then title-based fallback
-function testNetflix() {
-  return new Promise(resolve => {
-    $task.fetch({
-      url: NETFLIX_CDN_URL,
-      opts: optsNoRedirect,
-      timeout: 5000,
-      headers: { 'User-Agent': UA },
-    }).then(cdnRes => {
-      if (statusCodeOf(cdnRes) === 403) {
-        result.Netflix = '<b>Netflix: </b>未支持 (IP Banned) 🚫'
-        return resolve()
-      }
-      try {
-        const data = JSON.parse(cdnRes.body || '')
-        if (data && data.targets && data.targets.length > 0) {
-          const country = data.targets[0].location && data.targets[0].location.country
-          if (country) {
-            result.Netflix = '<b>Netflix: </b>完整支持' + ARROW + regionText(country) + ' 🎉'
-            return resolve()
-          }
-        }
-      } catch (e) {}
-
-      // Fallback: title-based detection
-      $task.fetch({
-        url: 'https://www.netflix.com/title/' + FILM_ID_1,
-        opts: optsNoRedirect,
-        timeout: 5000,
-        headers: { 'User-Agent': UA },
-      }).then(r1 => {
-        $task.fetch({
-          url: 'https://www.netflix.com/title/' + FILM_ID_2,
-          opts: optsNoRedirect,
-          timeout: 5000,
-          headers: { 'User-Agent': UA },
-        }).then(r2 => {
-          const s1 = statusCodeOf(r1)
-          const s2 = statusCodeOf(r2)
-          if (s1 === 404 && s2 === 404) {
-            result.Netflix = '<b>Netflix: </b>仅支持自制剧 ⚠️'
-            return resolve()
-          }
-          if (s1 === 403 || s2 === 403) {
-            result.Netflix = '<b>Netflix: </b>未支持 🚫'
-            return resolve()
-          }
-          if (s1 === 200 || s1 === 301 || s2 === 200 || s2 === 301) {
-            $task.fetch({
-              url: 'https://www.netflix.com/title/' + FILM_ID_3,
-              opts: optsNoRedirect,
-              timeout: 5000,
-              headers: { 'User-Agent': UA },
-            }).then(r3 => {
-              let region = 'US'
-              const loc = (r3.headers && (r3.headers['Location'] || r3.headers['location'])) || ''
-              if (loc) {
-                const parts = loc.split('/')
-                if (parts.length >= 4) region = parts[3].split('-')[0] || 'US'
-              }
-              result.Netflix = '<b>Netflix: </b>完整支持' + ARROW + regionText(region) + ' 🎉'
-              resolve()
-            }, () => {
-              result.Netflix = '<b>Netflix: </b>完整支持' + ARROW + regionText('US') + ' 🎉'
-              resolve()
-            })
-          } else {
-            result.Netflix = '<b>Netflix: </b>检测失败 ❗️'
-            resolve()
-          }
-        }, () => { result.Netflix = '<b>Netflix: </b>检测超时 🚦'; resolve() })
-      }, () => { result.Netflix = '<b>Netflix: </b>检测超时 🚦'; resolve() })
-    }, () => { result.Netflix = '<b>Netflix: </b>检测超时 🚦'; resolve() })
-  })
-}
-
-// ── YouTube Premium ───────────────────────────────────────────────────────────
-// Logic from clash-verge-rev youtube.rs
-function testYouTube() {
-  return new Promise(resolve => {
-    $task.fetch({
-      url: BASE_URL_YTB,
-      opts: opts,
-      timeout: 5000,
-      headers: { 'User-Agent': UA },
-    }).then(res => {
-      const code = statusCodeOf(res)
-      const body = res.body || ''
-      const bodyLower = body.toLowerCase()
-      const m = body.match(/"GL"\s*:\s*"([A-Za-z]{2})"/) || body.match(/"countryCode"\s*:\s*"([A-Za-z]{2})"/)
-      const region = m ? m[1].toUpperCase() : 'US'
-
-      if (bodyLower.indexOf('premium is not available in your country') !== -1 ||
-          bodyLower.indexOf('premium is not available in your region') !== -1) {
-        result.YouTube = '<b>YouTube Premium: </b>未支持 🚫'
-      } else if (code >= 200 && code < 300 &&
-                 (bodyLower.indexOf('youtube premium') !== -1 || bodyLower.indexOf('ad-free') !== -1)) {
-        result.YouTube = '<b>YouTube Premium: </b>支持' + ARROW + regionText(region) + ' 🎉'
-      } else {
-        result.YouTube = '<b>YouTube Premium: </b>检测失败 ❗️'
-      }
-      resolve()
-    }, () => { result.YouTube = '<b>YouTube Premium: </b>检测超时 🚦'; resolve() })
-  })
-}
-
-// ── Disney+ ───────────────────────────────────────────────────────────────────
-// Logic from clash-verge-rev disney_plus.rs (Device -> Token -> GraphQL)
-function testDisney() {
-  return new Promise(resolve => {
-    const authHeader = 'Bearer ZGlzbmV5JmJyb3dzZXImMS4wLjA.Cu56AgSfBTDag5NiRA81oLHkDZfu5L3CKadnefEAY84'
-
-    $task.fetch({
-      url: 'https://disney.api.edge.bamgrid.com/devices',
-      method: 'POST',
-      opts: opts,
-      timeout: 6000,
-      headers: { 'authorization': authHeader, 'content-type': 'application/json', 'User-Agent': UA },
-      body: JSON.stringify({ deviceFamily: 'browser', applicationRuntime: 'chrome', deviceProfile: 'windows', attributes: {} }),
-    }).then(devRes => {
-      if (statusCodeOf(devRes) === 403) {
-        result.Disney = '<b>Disneyᐩ: </b>未支持 🚫'
-        return resolve()
-      }
-      const assertionMatch = (devRes.body || '').match(/"assertion"\s*:\s*"([^"]+)"/)
-      if (!assertionMatch) {
-        result.Disney = '<b>Disneyᐩ: </b>检测失败 ❗️'
-        return resolve()
-      }
-
-      $task.fetch({
-        url: 'https://disney.api.edge.bamgrid.com/token',
-        method: 'POST',
-        opts: opts,
-        timeout: 6000,
-        headers: { 'authorization': authHeader, 'content-type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
-        body: 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange&latitude=0&longitude=0&platform=browser&subject_token=' + assertionMatch[1] + '&subject_token_type=urn:bamtech:params:oauth:token-type:device',
-      }).then(tokenRes => {
-        const tBody = tokenRes.body || ''
-        if (tBody.indexOf('forbidden-location') !== -1) {
-          result.Disney = '<b>Disneyᐩ: </b>未支持 🚫'
-          return resolve()
-        }
-        const rtMatch = tBody.match(/"refresh_token"\s*:\s*"([^"]+)"/)
-        if (!rtMatch) {
-          result.Disney = '<b>Disneyᐩ: </b>检测失败 ❗️'
-          return resolve()
-        }
-
-        $task.fetch({
-          url: 'https://disney.api.edge.bamgrid.com/graph/v1/device/graphql',
-          method: 'POST',
-          opts: opts,
-          timeout: 6000,
-          headers: { 'authorization': authHeader, 'content-type': 'application/json', 'User-Agent': UA },
-          body: JSON.stringify({
-            query: 'mutation refreshToken($input: RefreshTokenInput!) { refreshToken(refreshToken: $input) { activeSession { sessionId } } }',
-            variables: { input: { refreshToken: rtMatch[1] } },
-          }),
-        }).then(gqlRes => {
-          const gBody = gqlRes.body || ''
-          const regMatch = gBody.match(/"countryCode"\s*:\s*"([^"]+)"/)
-          const inSupported = gBody.indexOf('"inSupportedLocation":true') !== -1 ||
-                              gBody.indexOf('"inSupportedLocation": true') !== -1
-          if (!regMatch) {
-            result.Disney = '<b>Disneyᐩ: </b>未支持 🚫'
-            return resolve()
-          }
-          const region = regMatch[1]
-          if (region === 'JP' || inSupported) {
-            result.Disney = '<b>Disneyᐩ: </b>支持' + ARROW + regionText(region) + ' 🎉'
-          } else {
-            result.Disney = '<b>Disneyᐩ: </b>即将上线' + ARROW + regionText(region) + ' ⚠️'
-          }
-          resolve()
-        }, () => { result.Disney = '<b>Disneyᐩ: </b>检测超时 🚦'; resolve() })
-      }, () => { result.Disney = '<b>Disneyᐩ: </b>检测超时 🚦'; resolve() })
-    }, () => { result.Disney = '<b>Disneyᐩ: </b>检测超时 🚦'; resolve() })
-  })
-}
-
-// ── Prime Video ───────────────────────────────────────────────────────────────
-// Logic from clash-verge-rev prime_video.rs
-function testPrimeVideo() {
-  return new Promise(resolve => {
-    $task.fetch({
-      url: BASE_URL_PRIME,
-      opts: opts,
-      timeout: 5000,
-      headers: { 'User-Agent': UA },
-    }).then(res => {
-      const body = res.body || ''
-      if (body.indexOf('isServiceRestricted') !== -1) {
-        result.PrimeVideo = '<b>Prime Video: </b>未支持 🚫'
-      } else {
-        const m = body.match(/"currentTerritory":"([^"]+)"/)
-        if (m && m[1]) {
-          result.PrimeVideo = '<b>Prime Video: </b>支持' + ARROW + regionText(m[1]) + ' 🎉'
-        } else {
-          result.PrimeVideo = '<b>Prime Video: </b>未支持 🚫'
-        }
-      }
-      resolve()
-    }, () => { result.PrimeVideo = '<b>Prime Video: </b>检测超时 🚦'; resolve() })
-  })
-}
-
-// ── Spotify ───────────────────────────────────────────────────────────────────
-// Logic from clash-verge-rev spotify.rs
-function testSpotify() {
-  return new Promise(resolve => {
-    $task.fetch({
-      url: BASE_URL_SPOTIFY,
-      opts: opts,
-      timeout: 5000,
-      headers: { 'User-Agent': UA },
-    }).then(res => {
-      const code = statusCodeOf(res)
-      const body = res.body || ''
-      if (code === 403 || code === 451 || body.toLowerCase().indexOf('not available in your country') !== -1) {
-        result.Spotify = '<b>Spotify: </b>未支持 🚫'
-      } else if (code >= 200 && code < 300) {
-        const m = body.match(/"countryCode":"([^"]+)"/)
-        result.Spotify = '<b>Spotify: </b>支持' + (m ? ARROW + regionText(m[1]) : '') + ' 🎉'
-      } else {
-        result.Spotify = '<b>Spotify: </b>检测失败 ❗️'
-      }
-      resolve()
-    }, () => { result.Spotify = '<b>Spotify: </b>检测超时 🚦'; resolve() })
-  })
-}
-
-// ── TikTok ────────────────────────────────────────────────────────────────────
-// Logic from clash-verge-rev tiktok.rs
-function testTikTok() {
-  return new Promise(resolve => {
-    $task.fetch({
-      url: BASE_URL_TIKTOK_TRACE,
-      opts: opts,
-      timeout: 5000,
-      headers: { 'User-Agent': UA },
-    }).then(res => {
-      const code = statusCodeOf(res)
-      if (code === 403 || code === 451) {
-        result.TikTok = '<b>TikTok: </b>未支持 🚫'
-        return resolve()
-      }
-      const body = res.body || ''
-      const m = body.match(/loc=([A-Za-z]+)/)
-      if (m && m[1]) {
-        result.TikTok = '<b>TikTok: </b>支持' + ARROW + regionText(m[1]) + ' 🎉'
-        return resolve()
-      }
-      // fallback to homepage
-      $task.fetch({
-        url: 'https://www.tiktok.com/',
-        opts: opts,
-        timeout: 5000,
-        headers: { 'User-Agent': UA },
-      }).then(htmlRes => {
-        const htmlBody = htmlRes.body || ''
-        if (htmlBody.toLowerCase().indexOf('access denied') !== -1 ||
-            htmlBody.toLowerCase().indexOf('not available in your region') !== -1) {
-          result.TikTok = '<b>TikTok: </b>未支持 🚫'
-          return resolve()
-        }
-        const rm = htmlBody.match(/"region"\s*:\s*"([a-zA-Z-]+)"/)
-        if (rm && rm[1]) {
-          result.TikTok = '<b>TikTok: </b>支持' + ARROW + regionText(rm[1]) + ' 🎉'
-        } else {
-          result.TikTok = '<b>TikTok: </b>检测失败 ❗️'
-        }
-        resolve()
-      }, () => { result.TikTok = '<b>TikTok: </b>检测超时 🚦'; resolve() })
-    }, () => { result.TikTok = '<b>TikTok: </b>检测超时 🚦'; resolve() })
-  })
-}
-
-// ── Bilibili Mainland ─────────────────────────────────────────────────────────
-// Logic from clash-verge-rev bilibili.rs
-function testBilibiliMainland() {
-  return new Promise(resolve => {
-    $task.fetch({
-      url: BILIBILI_MAINLAND_URL,
-      opts: opts,
-      timeout: 5000,
-      headers: { 'User-Agent': UA },
-    }).then(res => {
-      try {
-        const data = JSON.parse(res.body || '')
-        if (data.code === 0) result.BilibiliMainland = '<b>哔哩哔哩大陆: </b>支持 🎉'
-        else if (data.code === -10403) result.BilibiliMainland = '<b>哔哩哔哩大陆: </b>未支持 🚫'
-        else result.BilibiliMainland = '<b>哔哩哔哩大陆: </b>检测失败 ❗️'
-      } catch (e) { result.BilibiliMainland = '<b>哔哩哔哩大陆: </b>检测失败 ❗️' }
-      resolve()
-    }, () => { result.BilibiliMainland = '<b>哔哩哔哩大陆: </b>检测超时 🚦'; resolve() })
-  })
-}
-
-// ── Bilibili HK/MO/TW ────────────────────────────────────────────────────────
-// Logic from clash-verge-rev bilibili.rs
-function testBilibiliHKMOTW() {
-  return new Promise(resolve => {
-    $task.fetch({
-      url: BILIBILI_HKMOtw_URL,
-      opts: opts,
-      timeout: 5000,
-      headers: { 'User-Agent': UA },
-    }).then(res => {
-      try {
-        const data = JSON.parse(res.body || '')
-        if (data.code === 0) result.BilibiliHKMOTW = '<b>哔哩哔哩港澳台: </b>支持 🎉'
-        else if (data.code === -10403) result.BilibiliHKMOTW = '<b>哔哩哔哩港澳台: </b>未支持 🚫'
-        else result.BilibiliHKMOTW = '<b>哔哩哔哩港澳台: </b>检测失败 ❗️'
-      } catch (e) { result.BilibiliHKMOTW = '<b>哔哩哔哩港澳台: </b>检测失败 ❗️' }
-      resolve()
-    }, () => { result.BilibiliHKMOTW = '<b>哔哩哔哩港澳台: </b>检测超时 🚦'; resolve() })
-  })
-}
-
-// ── Bahamut Anime ─────────────────────────────────────────────────────────────
-// Logic from clash-verge-rev bahamut.rs
-function testBahamut() {
-  return new Promise(resolve => {
-    $task.fetch({
-      url: BASE_URL_BAHAMUT_DEVICE,
-      opts: opts,
-      timeout: 5000,
-      headers: { 'User-Agent': UA },
-    }).then(devRes => {
-      const devMatch = (devRes.body || '').match(/"deviceid"\s*:\s*"([^"]+)"/)
-      if (!devMatch) {
-        result.Bahamut = '<b>Bahamut Anime: </b>未支持 🚫'
-        return resolve()
-      }
-      let cookieStr = ''
-      if (devRes.headers && devRes.headers['Set-Cookie']) {
-        cookieStr = Array.isArray(devRes.headers['Set-Cookie'])
-          ? devRes.headers['Set-Cookie'].join('; ')
-          : devRes.headers['Set-Cookie']
-      }
-
-      $task.fetch({
-        url: 'https://ani.gamer.com.tw/ajax/token.php?adID=89422&sn=37783&device=' + devMatch[1],
-        opts: opts,
-        timeout: 5000,
-        headers: { 'User-Agent': UA, 'Cookie': cookieStr },
-      }).then(tokenRes => {
-        if ((tokenRes.body || '').indexOf('animeSn') === -1) {
-          result.Bahamut = '<b>Bahamut Anime: </b>未支持 🚫'
-          return resolve()
-        }
-
-        $task.fetch({
-          url: 'https://ani.gamer.com.tw/',
-          opts: opts,
-          timeout: 5000,
-          headers: { 'User-Agent': UA, 'Cookie': cookieStr },
-        }).then(htmlRes => {
-          const regMatch = (htmlRes.body || '').match(/data-geo="([^"]+)"/)
-          const region = regMatch ? regMatch[1] : 'TW'
-          result.Bahamut = '<b>Bahamut Anime: </b>支持' + ARROW + regionText(region) + ' 🎉'
-          resolve()
-        }, () => { result.Bahamut = '<b>Bahamut Anime: </b>检测超时 🚦'; resolve() })
-      }, () => { result.Bahamut = '<b>Bahamut Anime: </b>检测超时 🚦'; resolve() })
-    }, () => { result.Bahamut = '<b>Bahamut Anime: </b>检测超时 🚦'; resolve() })
-  })
-}
-
-// ── ChatGPT ───────────────────────────────────────────────────────────────────
-// Logic from clash-verge-rev chatgpt.rs (3-endpoint check)
-function testChatGPT() {
-  return new Promise(resolve => {
-    // Step 1: region via trace
-    $task.fetch({
-      url: BASE_URL_CHATGPT_TRACE,
-      opts: optsNoRedirect,
-      timeout: 5000,
-      headers: { 'User-Agent': UA },
-    }).then(traceRes => {
-      const traceBody = traceRes.body || ''
-      const traceMatch = traceBody.match(/loc=([A-Z]{2})/i)
-      const region = traceMatch ? traceMatch[1].toUpperCase() : ''
-
-      // Step 2: web check
-      $task.fetch({
-        url: BASE_URL_CHATGPT_WEB,
-        opts: optsNoRedirect,
-        timeout: 5000,
-        headers: { 'User-Agent': UA },
-      }).then(webRes => {
-        const webAvailable = (webRes.body || '').toLowerCase().indexOf('unsupported_country') === -1
-
-        // Step 3: iOS check
-        $task.fetch({
-          url: BASE_URL_CHATGPT_IOS,
-          opts: optsNoRedirect,
-          timeout: 5000,
-          headers: { 'User-Agent': UA },
-        }).then(iosRes => {
-          const iosBody = (iosRes.body || '').toLowerCase()
-          const iosOk = iosBody.indexOf('request is not allowed. please try again later.') !== -1
-
-          if (webAvailable) {
-            result.ChatGPT = '<b>ChatGPT: </b>支持网页' + (iosOk ? '/App ' : ' ') +
-              (region ? ARROW + regionText(region) : '') + ' 🎉'
-          } else if (iosOk) {
-            result.ChatGPT = '<b>ChatGPT: </b>仅支持App ' + (region ? ARROW + regionText(region) : '') + ' 🎉'
-          } else {
-            result.ChatGPT = '<b>ChatGPT: </b>未支持 🚫'
-          }
-          resolve()
-        }, () => {
-          // iOS failed, fall back to web-only result
-          if (webAvailable) {
-            result.ChatGPT = '<b>ChatGPT: </b>支持网页 ' + (region ? ARROW + regionText(region) : '') + ' 🎉'
-          } else {
-            result.ChatGPT = '<b>ChatGPT: </b>未支持 🚫'
-          }
-          resolve()
-        })
-      }, () => { result.ChatGPT = '<b>ChatGPT: </b>检测超时 🚦'; resolve() })
-    }, () => { result.ChatGPT = '<b>ChatGPT: </b>检测超时 🚦'; resolve() })
-  })
-}
-
-// ── Gemini ────────────────────────────────────────────────────────────────────
-// Logic from clash-verge-rev gemini.rs
-// Extracts 3-letter country code from page source via marker ",2,1,200,\""
-function testGemini() {
-  return new Promise(resolve => {
-    $task.fetch({
-      url: BASE_URL_GEMINI,
-      opts: optsNoRedirect,
-      timeout: 6000,
-      headers: { 'User-Agent': UA },
-    }).then(res => {
-      const BLOCKED = ['CHN', 'RUS', 'BLR', 'CUB', 'IRN', 'PRK', 'SYR', 'HKG', 'MAC']
-      const match = (res.body || '').match(/,2,1,200,"([A-Z]{3})"/)
-      if (match && match[1]) {
-        if (BLOCKED.indexOf(match[1]) !== -1) {
-          result.Gemini = '<b>Gemini: </b>未支持 🚫'
-        } else {
-          result.Gemini = '<b>Gemini: </b>支持 ' + ARROW + '⟦' + match[1] + '⟧ 🎉'
-        }
-      } else {
-        result.Gemini = '<b>Gemini: </b>检测失败 ❗️'
-      }
-      resolve()
-    }, () => { result.Gemini = '<b>Gemini: </b>检测超时 🚦'; resolve() })
-  })
-}
-
-// ── Claude ────────────────────────────────────────────────────────────────────
-// Logic from clash-verge-rev claude.rs
-// Checks loc= from cdn-cgi/trace against a blocklist
-function testClaude() {
-  return new Promise(resolve => {
-    $task.fetch({
-      url: BASE_URL_CLAUDE_TRACE,
-      opts: optsNoRedirect,
-      timeout: 6000,
-      headers: { 'User-Agent': UA },
-    }).then(res => {
-      const BLOCKED = ['AF', 'BY', 'CN', 'CU', 'HK', 'IR', 'KP', 'MO', 'RU', 'SY']
-      const m = (res.body || '').match(/loc=([A-Z]{2})/i)
-      const region = m ? m[1].toUpperCase() : ''
-      if (!region) {
-        result.Claude = '<b>Claude: </b>检测失败 ❗️'
-      } else if (BLOCKED.indexOf(region) !== -1) {
-        result.Claude = '<b>Claude: </b>未支持 🚫'
-      } else {
-        result.Claude = '<b>Claude: </b>支持 ' + ARROW + regionText(region) + ' 🎉'
-      }
-      resolve()
-    }, () => { result.Claude = '<b>Claude: </b>检测超时 🚦'; resolve() })
-  })
-}
-
-// ── Main entry — mirrors qx.js structure exactly ──────────────────────────────
-;(async () => {
-  try {
-    const tasks = [
-      testNetflix(),
-      testYouTube(),
-      testDisney(),
-      testPrimeVideo(),
-      testSpotify(),
-      testTikTok(),
-      testBilibiliMainland(),
-      testBilibiliHKMOTW(),
-      testBahamut(),
-      testChatGPT(),
-      testGemini(),
-      testClaude(),
-    ]
-
-    await Promise.all(tasks.map(p => p.catch(error => console.log('Task Error: ' + error))))
-
-    const output = await getPolicyOutput()
-    $done({ title: result.title, htmlMessage: buildHtmlMessage(output) })
-  } catch (error) {
-    console.log('Main Error: ' + error)
-    $done({ title: result.title, htmlMessage: buildErrorMessage(String(error || '检测异常')) })
-  }
-})()
