@@ -26,7 +26,6 @@ const result = {
   ChatGPTWeb:  '',
   Claude:      '',
   Gemini:      '',
-  Bahamut:     '',
   PrimeVideo:  '',
   TikTok:      '',
 }
@@ -84,99 +83,89 @@ function line(label, status) {
   return '<b>' + label + ': </b>' + status
 }
 
+function withRegion(region) {
+  const tag = regionTag(region)
+  return tag ? ARROW + tag : ''
+}
+
 // ═══════════════════════════════════════════════════
-//  Netflix  (3-phase: CDN → Title × 2 → Region)
+//  Netflix  (CDN fast-path ∥ Title fallback)
 // ═══════════════════════════════════════════════════
 
 function testNetflix() {
-  return testNetflixCDN().then(cdn => {
-    if (cdn.ok) {
-      result.Netflix = line('Netflix', '完整支持' + ARROW + regionTag(cdn.region) + ' 🎉')
-      return
-    }
-    if (cdn.banned) {
-      result.Netflix = line('Netflix', 'IP 被封禁 🚫')
-      return
-    }
-    return testNetflixTitles()
-  }).catch(() => {
-    if (!result.Netflix) result.Netflix = line('Netflix', '检测失败 ❗️')
-  })
-}
-
-function testNetflixCDN() {
-  return fetchWithTimeout({
+  // CDN (fast.com) 和 Title 并行跑，CDN 先出结果就用 CDN
+  const cdnPromise = fetchWithTimeout({
     url: 'https://api.fast.com/netflix/speedtest/v2?https=true&token=YXNkZmFzZGxmbnNkYWZoYXNkZmhrYWxm&urlCount=5',
     opts: opts,
-    timeout: TIMEOUT,
+    timeout: 3000,
     headers: { 'User-Agent': UA },
   }).then(resp => {
-    if (statusCode(resp) === 403) return { banned: true }
+    if (statusCode(resp) === 403) return { status: 'banned' }
     try {
       const data = JSON.parse(resp.body)
       if (data.targets && data.targets.length > 0 && data.targets[0].location) {
-        return { ok: true, region: data.targets[0].location.country || '' }
+        return { status: 'ok', region: data.targets[0].location.country || '' }
       }
     } catch (e) { /* ignore */ }
-    return {}
-  }).catch(() => ({}))
-}
+    return { status: 'unknown' }
+  }).catch(() => ({ status: 'unknown' }))
 
-function testNetflixTitles() {
-  const fetch1 = fetchWithTimeout({
+  // Title 检测 (与旧脚本一致，用 x-originating-url 提取区域)
+  const titlePromise = fetchWithTimeout({
     url: 'https://www.netflix.com/title/81280792',
     opts: opts,
-    timeout: TIMEOUT,
+    timeout: 7000,
     headers: { 'User-Agent': UA },
-  }).then(r => statusCode(r)).catch(() => 0)
+  }).then(resp => {
+    const code = statusCode(resp)
+    const headers = resp.headers || {}
+    return { code, headers }
+  }).catch(() => ({ code: 0, headers: {} }))
 
-  const fetch2 = fetchWithTimeout({
-    url: 'https://www.netflix.com/title/70143836',
-    opts: opts,
-    timeout: TIMEOUT,
-    headers: { 'User-Agent': UA },
-  }).then(r => statusCode(r)).catch(() => 0)
+  return Promise.all([cdnPromise, titlePromise]).then(results => {
+    const cdn = results[0]
+    const title = results[1]
 
-  return Promise.all([fetch1, fetch2]).then(codes => {
-    const s1 = codes[0], s2 = codes[1]
+    // CDN 给出明确结果
+    if (cdn.status === 'banned') {
+      result.Netflix = line('Netflix', 'IP 被封禁 🚫')
+      return
+    }
+    if (cdn.status === 'ok') {
+      result.Netflix = line('Netflix', '完整支持' + withRegion(cdn.region) + ' 🎉')
+      return
+    }
 
-    if (s1 === 403 || s2 === 403) {
+    // Title 检测
+    if (title.code === 403) {
       result.Netflix = line('Netflix', '未支持 🚫')
       return
     }
-
-    if (s1 === 404 && s2 === 404) {
+    if (title.code === 404) {
       result.Netflix = line('Netflix', '仅自制剧集 ⚠️')
       return
     }
-
-    if (s1 === 200 || s1 === 301 || s2 === 200 || s2 === 301) {
-      return testNetflixRegion()
-    }
-
-    result.Netflix = line('Netflix', '检测失败 ❗️')
-  })
-}
-
-function testNetflixRegion() {
-  return fetchWithTimeout({
-    url: 'https://www.netflix.com/title/80018499',
-    opts: optsNoRedirect,
-    timeout: TIMEOUT,
-    headers: { 'User-Agent': UA },
-  }).then(resp => {
-    let region = 'US'
-    const headers = resp.headers || {}
-    const loc = headers['Location'] || headers['location'] || ''
-    if (loc) {
-      const parts = loc.split('/')
-      if (parts.length >= 4) {
-        region = (parts[3].split('-')[0] || 'US').toUpperCase()
+    if (title.code === 200 || title.code === 301 || title.code === 302) {
+      let region = ''
+      const xurl = title.headers['X-Originating-URL'] || title.headers['x-originating-url'] || ''
+      if (xurl) {
+        const parts = xurl.split('/')
+        if (parts.length >= 4) {
+          region = (parts[3].split('-')[0] || '').toUpperCase()
+        }
       }
+      if (!region || region === 'TITLE') region = 'US'
+      result.Netflix = line('Netflix', '完整支持' + withRegion(region) + ' 🎉')
+      return
     }
-    result.Netflix = line('Netflix', '完整支持' + ARROW + regionTag(region) + ' 🎉')
+
+    if (title.code === 0) {
+      result.Netflix = line('Netflix', '检测超时 🚦')
+    } else {
+      result.Netflix = line('Netflix', '检测失败 ❗️')
+    }
   }).catch(() => {
-    result.Netflix = line('Netflix', '支持 (区域未知) 🎉')
+    result.Netflix = line('Netflix', '检测失败 ❗️')
   })
 }
 
@@ -186,14 +175,19 @@ function testNetflixRegion() {
 
 function testYouTubePremium() {
   return fetchWithTimeout({
-    url: 'https://www.youtube.com/premium?hl=en',
+    url: 'https://www.youtube.com/premium',
     opts: opts,
-    timeout: TIMEOUT,
+    timeout: 7000,
     headers: { 'User-Agent': UA },
   }).then(resp => {
     const code = statusCode(resp)
     const body = resp.body || ''
     const bodyLower = body.toLowerCase()
+
+    if (code !== 200) {
+      result.YouTube = line('YouTube Premium', '检测失败 ❗️')
+      return
+    }
 
     // 区域提取 (4 种 regex，按优先级)
     let region = ''
@@ -208,23 +202,18 @@ function testYouTubePremium() {
       if (m && m[1]) { region = m[1].toUpperCase(); break }
     }
 
+    // 如果 body 里没有匹配到，尝试用 google.cn 判断 CN
+    if (!region && bodyLower.indexOf('www.google.cn') !== -1) region = 'CN'
+
     // 状态判断
-    if (bodyLower.indexOf('youtube premium is not available in your country') !== -1
-     || bodyLower.indexOf('premium is not available in your country') !== -1
+    if (bodyLower.indexOf('premium is not available in your country') !== -1
      || bodyLower.indexOf('premium is not available in your region') !== -1) {
       result.YouTube = line('YouTube Premium', '未支持 🚫')
       return
     }
 
-    if (code >= 200 && code < 300
-     && (bodyLower.indexOf('youtube premium') !== -1
-      || bodyLower.indexOf('ad-free') !== -1
-      || bodyLower.indexOf('"browseid":"spunlimited"') !== -1)) {
-      result.YouTube = line('YouTube Premium', '支持' + ARROW + regionTag(region) + ' 🎉')
-      return
-    }
-
-    result.YouTube = line('YouTube Premium', '检测失败 ❗️')
+    // 200 且没说不可用 → 支持
+    result.YouTube = line('YouTube Premium', '支持' + withRegion(region) + ' 🎉')
   }).catch(() => {
     result.YouTube = line('YouTube Premium', '检测超时 🚦')
   })
@@ -263,7 +252,7 @@ function testSpotify() {
     const m = body.match(/"countryCode"\s*:\s*"([A-Z]+)"/i)
     if (m && m[1]) region = m[1].toUpperCase()
 
-    result.Spotify = line('Spotify', '支持' + ARROW + regionTag(region) + ' 🎉')
+    result.Spotify = line('Spotify', '支持' + withRegion(region) + ' 🎉')
   }).catch(() => {
     result.Spotify = line('Spotify', '检测超时 🚦')
   })
@@ -287,7 +276,7 @@ function testChatGPT() {
       if (body.indexOf('you may be connected to a disallowed isp') !== -1) {
         result.ChatGPTiOS = line('ChatGPT iOS', 'ISP 受限 ⚠️' + regionStr)
       } else if (body.indexOf('request is not allowed. please try again later.') !== -1) {
-        result.ChatGPTiOS = line('ChatGPT iOS', '支持' + regionStr + ' 🎉')
+        result.ChatGPTiOS = line('ChatGPT iOS', '支持' + regionStr + '🎉')
       } else if (body.indexOf('sorry, you have been blocked') !== -1) {
         result.ChatGPTiOS = line('ChatGPT iOS', '已封锁 🚫')
       } else {
@@ -307,7 +296,7 @@ function testChatGPT() {
       if (body.indexOf('unsupported_country') !== -1) {
         result.ChatGPTWeb = line('ChatGPT Web', '未支持 🚫' + regionStr)
       } else {
-        result.ChatGPTWeb = line('ChatGPT Web', '支持' + regionStr + ' 🎉')
+        result.ChatGPTWeb = line('ChatGPT Web', '支持' + regionStr + '🎉')
       }
     }).catch(() => {
       result.ChatGPTWeb = line('ChatGPT Web', '检测超时 🚦')
@@ -330,7 +319,7 @@ function testClaude() {
     } else if (CLAUDE_BLOCKED.indexOf(region) !== -1) {
       result.Claude = line('Claude', '未支持 🚫')
     } else {
-      result.Claude = line('Claude', '支持' + ARROW + regionTag(region) + ' 🎉')
+      result.Claude = line('Claude', '支持' + withRegion(region) + ' 🎉')
     }
   })
 }
@@ -340,6 +329,39 @@ function testClaude() {
 // ═══════════════════════════════════════════════════
 
 const GEMINI_BLOCKED = ['CHN', 'RUS', 'BLR', 'CUB', 'IRN', 'PRK', 'SYR', 'HKG', 'MAC']
+
+// ISO 3166 alpha-3 → alpha-2 映射 (Gemini 返回 alpha-3)
+const A3_TO_A2 = {
+  AFG:'AF',ALB:'AL',DZA:'DZ',AND:'AD',AGO:'AO',ATG:'AG',ARG:'AR',ARM:'AM',
+  AUS:'AU',AUT:'AT',AZE:'AZ',BHS:'BS',BHR:'BH',BGD:'BD',BRB:'BB',BLR:'BY',
+  BEL:'BE',BLZ:'BZ',BEN:'BJ',BTN:'BT',BOL:'BO',BIH:'BA',BWA:'BW',BRA:'BR',
+  BRN:'BN',BGR:'BG',BFA:'BF',BDI:'BI',KHM:'KH',CMR:'CM',CAN:'CA',CPV:'CV',
+  CAF:'CF',TCD:'TD',CHL:'CL',CHN:'CN',COL:'CO',COM:'KM',COG:'CG',COD:'CD',
+  CRI:'CR',CIV:'CI',HRV:'HR',CUB:'CU',CYP:'CY',CZE:'CZ',DNK:'DK',DJI:'DJ',
+  DMA:'DM',DOM:'DO',ECU:'EC',EGY:'EG',SLV:'SV',GNQ:'GQ',ERI:'ER',EST:'EE',
+  SWZ:'SZ',ETH:'ET',FJI:'FJ',FIN:'FI',FRA:'FR',GAB:'GA',GMB:'GM',GEO:'GE',
+  DEU:'DE',GHA:'GH',GRC:'GR',GRD:'GD',GTM:'GT',GIN:'GN',GNB:'GW',GUY:'GY',
+  HTI:'HT',HND:'HN',HUN:'HU',ISL:'IS',IND:'IN',IDN:'ID',IRN:'IR',IRQ:'IQ',
+  IRL:'IE',ISR:'IL',ITA:'IT',JAM:'JM',JPN:'JP',JOR:'JO',KAZ:'KZ',KEN:'KE',
+  KIR:'KI',PRK:'KP',KOR:'KR',KWT:'KW',KGZ:'KG',LAO:'LA',LVA:'LV',LBN:'LB',
+  LSO:'LS',LBR:'LR',LBY:'LY',LIE:'LI',LTU:'LT',LUX:'LU',MDG:'MG',MWI:'MW',
+  MYS:'MY',MDV:'MV',MLI:'ML',MLT:'MT',MHL:'MH',MRT:'MR',MUS:'MU',MEX:'MX',
+  FSM:'FM',MDA:'MD',MCO:'MC',MNG:'MN',MNE:'ME',MAR:'MA',MOZ:'MZ',MMR:'MM',
+  NAM:'NA',NRU:'NR',NPL:'NP',NLD:'NL',NZL:'NZ',NIC:'NI',NER:'NE',NGA:'NG',
+  MKD:'MK',NOR:'NO',OMN:'OM',PAK:'PK',PLW:'PW',PAN:'PA',PNG:'PG',PRY:'PY',
+  PER:'PE',PHL:'PH',POL:'PL',PRT:'PT',QAT:'QA',ROU:'RO',RUS:'RU',RWA:'RW',
+  KNA:'KN',LCA:'LC',VCT:'VC',WSM:'WS',SMR:'SM',STP:'ST',SAU:'SA',SEN:'SN',
+  SRB:'RS',SYC:'SC',SLE:'SL',SGP:'SG',SVK:'SK',SVN:'SI',SLB:'SB',SOM:'SO',
+  ZAF:'ZA',ESP:'ES',LKA:'LK',SDN:'SD',SUR:'SR',SWE:'SE',CHE:'CH',SYR:'SY',
+  TWN:'TW',TJK:'TJ',TZA:'TZ',THA:'TH',TLS:'TL',TGO:'TG',TON:'TO',TTO:'TT',
+  TUN:'TN',TUR:'TR',TKM:'TM',TUV:'TV',UGA:'UG',UKR:'UA',ARE:'AE',GBR:'GB',
+  USA:'US',URY:'UY',UZB:'UZ',VUT:'VU',VEN:'VE',VNM:'VN',YEM:'YE',ZMB:'ZM',
+  ZWE:'ZW',HKG:'HK',MAC:'MO',PSE:'PS',XKX:'XK',
+}
+
+function alpha3toAlpha2(a3) {
+  return A3_TO_A2[a3] || a3
+}
 
 function testGemini() {
   return fetchWithTimeout({
@@ -358,7 +380,8 @@ function testGemini() {
         if (GEMINI_BLOCKED.indexOf(code) !== -1) {
           result.Gemini = line('Gemini', '未支持 🚫')
         } else {
-          result.Gemini = line('Gemini', '支持' + ARROW + regionTag(code) + ' 🎉')
+          const a2 = alpha3toAlpha2(code)
+          result.Gemini = line('Gemini', '支持' + withRegion(a2) + ' 🎉')
         }
         return
       }
@@ -369,59 +392,7 @@ function testGemini() {
   })
 }
 
-// ═══════════════════════════════════════════════════
-//  Bahamut 動畫瘋  (deviceid → token → region)
-// ═══════════════════════════════════════════════════
 
-function testBahamut() {
-  return fetchWithTimeout({
-    url: 'https://ani.gamer.com.tw/ajax/getdeviceid.php',
-    opts: opts,
-    timeout: TIMEOUT,
-    headers: { 'User-Agent': UA },
-  }).then(resp => {
-    const body = resp.body || ''
-    const m = body.match(/"deviceid"\s*:\s*"([^"]+)"/)
-    const deviceId = m ? m[1] : ''
-
-    if (!deviceId) {
-      result.Bahamut = line('Bahamut 動畫瘋', '检测失败 ❗️')
-      return
-    }
-
-    return fetchWithTimeout({
-      url: 'https://ani.gamer.com.tw/ajax/token.php?adID=89422&sn=37783&device=' + deviceId,
-      opts: opts,
-      timeout: TIMEOUT,
-      headers: { 'User-Agent': UA },
-    }).then(tokenResp => {
-      const tokenBody = tokenResp.body || ''
-
-      if (tokenBody.indexOf('animeSn') === -1) {
-        result.Bahamut = line('Bahamut 動畫瘋', '未支持 🚫')
-        return
-      }
-
-      // Step 3: 获取区域
-      return fetchWithTimeout({
-        url: 'https://ani.gamer.com.tw/',
-        opts: opts,
-        timeout: TIMEOUT,
-        headers: { 'User-Agent': UA },
-      }).then(mainResp => {
-        const mainBody = mainResp.body || ''
-        const geoMatch = mainBody.match(/data-geo="([^"]+)"/)
-        const region = geoMatch ? geoMatch[1].toUpperCase() : ''
-
-        result.Bahamut = line('Bahamut 動畫瘋', '支持' + ARROW + regionTag(region) + ' 🎉')
-      }).catch(() => {
-        result.Bahamut = line('Bahamut 動畫瘋', '支持 (区域未知) 🎉')
-      })
-    })
-  }).catch(() => {
-    result.Bahamut = line('Bahamut 動畫瘋', '检测超时 🚦')
-  })
-}
 
 // ═══════════════════════════════════════════════════
 //  Prime Video  (currentTerritory)
@@ -431,7 +402,7 @@ function testPrimeVideo() {
   return fetchWithTimeout({
     url: 'https://www.primevideo.com',
     opts: opts,
-    timeout: TIMEOUT,
+    timeout: 10000,
     headers: { 'User-Agent': UA },
   }).then(resp => {
     const body = resp.body || ''
@@ -444,7 +415,7 @@ function testPrimeVideo() {
     const m = body.match(/"currentTerritory"\s*:\s*"([^"]+)"/)
     if (m && m[1]) {
       const region = m[1].toUpperCase()
-      result.PrimeVideo = line('Prime Video', '支持' + ARROW + regionTag(region) + ' 🎉')
+      result.PrimeVideo = line('Prime Video', '支持' + withRegion(region) + ' 🎉')
     } else {
       result.PrimeVideo = line('Prime Video', '检测失败 ❗️')
     }
@@ -534,7 +505,7 @@ function parseTikTokResponse(code, body) {
 
 function applyTikTokResult(status, region) {
   if (status === 'Yes') {
-    result.TikTok = line('TikTok', '支持' + ARROW + regionTag(region) + ' 🎉')
+    result.TikTok = line('TikTok', '支持' + withRegion(region) + ' 🎉')
   } else if (status === 'No') {
     result.TikTok = line('TikTok', '未支持 🚫')
   } else {
@@ -560,7 +531,6 @@ function applyTikTokResult(status, region) {
       testChatGPT(),
       testClaude(),
       testGemini(),
-      testBahamut(),
       testPrimeVideo(),
       testTikTok(),
     ].map(p => p.catch(e => console.log('Task error: ' + e))))
@@ -582,7 +552,6 @@ function buildHtml(policyOutput) {
     result.YouTube,
     result.Spotify,
     result.PrimeVideo,
-    result.Bahamut,
     result.TikTok,
     result.ChatGPTiOS,
     result.ChatGPTWeb,
